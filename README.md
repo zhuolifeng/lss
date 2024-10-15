@@ -31,7 +31,7 @@ pip install nuscenes-devkit tensorboardX efficientnet_pytorch==0.7.0
 ```
 
 ### Pre-trained Model
-Download a pre-trained BEV vehicle segmentation model from here: [https://drive.google.com/file/d/18fy-6beTFTZx5SrYLs9Xk7cY-fGSm7kw/view?usp=sharing](https://drive.google.com/file/d/18fy-6beTFTZx5SrYLs9Xk7cY-fGSm7kw/view?usp=sharing)
+Download a pre-trained BEV vehicle segmentation model from here: [https://drive.google.com/file/d/1bsUYveW_eOqa4lglryyGQNeC4fyQWvQQ/view?usp=sharing](https://drive.google.com/file/d/1bsUYveW_eOqa4lglryyGQNeC4fyQWvQQ/view?usp=sharing)
 
 | Vehicle IOU (reported in paper)        | Vehicle IOU (this repository)         |
 |:-------------:|:-------------:| 
