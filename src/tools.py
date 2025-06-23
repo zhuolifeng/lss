@@ -18,6 +18,7 @@ import matplotlib.pyplot as plt
 from nuscenes.utils.data_classes import LidarPointCloud
 from nuscenes.utils.geometry_utils import transform_matrix
 from nuscenes.map_expansion.map_api import NuScenesMap
+from corruptions.corrupt import ImageCorruption
 
 
 def get_lidar_data(nusc, sample_rec, nsweeps, min_distance):
@@ -247,19 +248,28 @@ def get_val_info(model, valloader, loss_fn, device, use_tqdm=False):
     total_union = 0
     print('running eval...')
     loader = tqdm(valloader) if use_tqdm else valloader
+    imagecorruption = ImageCorruption(model, device=device)
     with torch.no_grad():
         for batch in loader:
             allimgs, rots, trans, intrins, post_rots, post_trans, binimgs = batch
-            preds = model(allimgs.to(device), rots.to(device),
+            # torch.Size([4, 6, 3, 128, 352])  # 图像数据
+            # torch.Size([4, 6, 3, 3])        # 相机内参
+            # torch.Size([4, 6, 3])           # 相机外参
+            # torch.Size([4, 6, 3, 3])        # 相机到ego的变换
+            # torch.Size([4, 6, 3, 3])        # ego到相机的变换
+            # torch.Size([4, 6, 3])           # 相机到ego的平移
+            # torch.Size([4, 1, 200, 200])    # BEV标签
+            corrputed_images = imagecorruption.apply_corruption(allimgs, rots, trans, intrins, post_rots, post_trans, binimgs)
+            corrputed_preds = model(corrputed_images.to(device), rots.to(device),
                           trans.to(device), intrins.to(device), post_rots.to(device),
                           post_trans.to(device))
-            binimgs = binimgs.to(device)
+            corrputed_binimgs = binimgs.to(device)
 
             # loss
-            total_loss += loss_fn(preds, binimgs).item() * preds.shape[0]
+            total_loss += loss_fn(corrputed_preds, corrputed_binimgs).item() * corrputed_preds.shape[0]
 
             # iou
-            intersect, union, _ = get_batch_iou(preds, binimgs)
+            intersect, union, _ = get_batch_iou(corrputed_preds, corrputed_binimgs)
             total_intersect += intersect
             total_union += union
 

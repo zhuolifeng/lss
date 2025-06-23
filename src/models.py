@@ -31,7 +31,7 @@ class Up(nn.Module):
     def forward(self, x1, x2):
         x1 = self.up(x1)
         x1 = torch.cat([x2, x1], dim=1)
-        return self.conv(x1)
+        return self.conv(x1)        
 
 
 class CamEncode(nn.Module):

@@ -10,16 +10,18 @@ mpl.use('Agg')
 import matplotlib.pyplot as plt
 from PIL import Image
 import matplotlib.patches as mpatches
+import os
 
 from .data import compile_data
 from .tools import (ego_to_cam, get_only_in_img_mask, denormalize_img,
                     SimpleLoss, get_val_info, add_ego, gen_dx_bx,
                     get_nusc_maps, plot_nusc_map)
 from .models import compile_model
+from corruptions.corrupt import ImageCorruption
 
 
 def lidar_check(version,
-                dataroot='/data/nuscenes',
+                dataroot='/dataset/nuscenes',
                 show_lidar=True,
                 viz_train=False,
                 nepochs=1,
@@ -117,7 +119,7 @@ def lidar_check(version,
 
 
 def cumsum_check(version,
-                dataroot='/data/nuscenes',
+                dataroot='/dataset/nuscenes',
                 gpuid=1,
 
                 H=900, W=1600,
@@ -193,7 +195,7 @@ def cumsum_check(version,
 
 def eval_model_iou(version,
                 modelf,
-                dataroot='/data/nuscenes',
+                dataroot='/dataset/nuscenes',
                 gpuid=1,
 
                 H=900, W=1600,
@@ -208,7 +210,7 @@ def eval_model_iou(version,
                 zbound=[-10.0, 10.0, 20.0],
                 dbound=[4.0, 45.0, 1.0],
 
-                bsz=4,
+                bsz=1,
                 nworkers=10,
                 ):
     grid_conf = {
@@ -248,8 +250,9 @@ def eval_model_iou(version,
 
 def viz_model_preds(version,
                     modelf,
-                    dataroot='/data/nuscenes',
-                    map_folder='/data/nuscenes/mini',
+                    dataroot='/dataset/nuscenes',
+                    map_folder='/dataset/nuscenes/mini',
+                    output_dir='./output_images',
                     gpuid=1,
                     viz_train=False,
 
@@ -268,6 +271,10 @@ def viz_model_preds(version,
                     bsz=4,
                     nworkers=10,
                     ):
+    # Create output directory if it doesn't exist
+    os.makedirs(output_dir, exist_ok=True)
+    print(f'Saving images to: {output_dir}')
+    
     grid_conf = {
         'xbound': xbound,
         'ybound': ybound,
@@ -316,9 +323,11 @@ def viz_model_preds(version,
 
     model.eval()
     counter = 0
+    corrupt = ImageCorruption(model, device)
     with torch.no_grad():
         for batchi, (imgs, rots, trans, intrins, post_rots, post_trans, binimgs) in enumerate(loader):
-            out = model(imgs.to(device),
+            corr_imgs = corrupt.apply_corruption(imgs, rots, trans, intrins, post_rots, post_trans, binimgs, type='attack')
+            out = model(corr_imgs.to(device),
                     rots.to(device),
                     trans.to(device),
                     intrins.to(device),
@@ -327,9 +336,9 @@ def viz_model_preds(version,
                     )
             out = out.sigmoid().cpu()
 
-            for si in range(imgs.shape[0]):
+            for si in range(corr_imgs.shape[0]):
                 plt.clf()
-                for imgi, img in enumerate(imgs[si]):
+                for imgi, img in enumerate(corr_imgs[si]):
                     ax = plt.subplot(gs[1 + imgi // 3, imgi % 3])
                     showimg = denormalize_img(img)
                     # flip the bottom images
@@ -357,7 +366,7 @@ def viz_model_preds(version,
                 plt.ylim((0, out.shape[3]))
                 add_ego(bx, dx)
 
-                imname = f'eval{batchi:06}_{si:03}.jpg'
+                imname = os.path.join(output_dir, f'eval{batchi:06}_{si:03}.jpg')
                 print('saving', imname)
                 plt.savefig(imname)
                 counter += 1

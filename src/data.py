@@ -244,7 +244,7 @@ def worker_rnd_init(x):
 def compile_data(version, dataroot, data_aug_conf, grid_conf, bsz,
                  nworkers, parser_name):
     nusc = NuScenes(version='v1.0-{}'.format(version),
-                    dataroot=os.path.join(dataroot, version),
+                    dataroot=dataroot,
                     verbose=False)
     parser = {
         'vizdata': VizData,
@@ -257,11 +257,11 @@ def compile_data(version, dataroot, data_aug_conf, grid_conf, bsz,
 
     trainloader = torch.utils.data.DataLoader(traindata, batch_size=bsz,
                                               shuffle=True,
-                                              num_workers=nworkers,
+                                              num_workers=0,  # 临时设为0避免共享内存问题
                                               drop_last=True,
                                               worker_init_fn=worker_rnd_init)
     valloader = torch.utils.data.DataLoader(valdata, batch_size=bsz,
                                             shuffle=False,
-                                            num_workers=nworkers)
+                                            num_workers=0)  # 临时设为0避免共享内存问题
 
     return trainloader, valloader
