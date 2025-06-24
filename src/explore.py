@@ -251,7 +251,7 @@ def eval_model_iou(version,
 def viz_model_preds(version,
                     modelf,
                     dataroot='/dataset/nuscenes',
-                    map_folder='/dataset/nuscenes/mini',
+                    map_folder='/dataset/nuscenes/',
                     output_dir='./output_images',
                     gpuid=1,
                     viz_train=False,
@@ -323,10 +323,13 @@ def viz_model_preds(version,
 
     model.eval()
     counter = 0
-    corrupt = ImageCorruption(model, device)
-    with torch.no_grad():
-        for batchi, (imgs, rots, trans, intrins, post_rots, post_trans, binimgs) in enumerate(loader):
-            corr_imgs = corrupt.apply_corruption(imgs, rots, trans, intrins, post_rots, post_trans, binimgs, type='attack')
+    corrupt = ImageCorruption(model)
+    for batchi, (imgs, rots, trans, intrins, post_rots, post_trans, binimgs) in enumerate(loader):
+        # 攻击需要梯度计算，所以不在no_grad中
+        corr_imgs = corrupt.apply_corruption(imgs.to(device), rots.to(device), trans.to(device), intrins.to(device), post_rots.to(device), post_trans.to(device), binimgs.to(device), type='noise', intensity='medium')
+        
+        # 推理时使用no_grad
+        with torch.no_grad():
             out = model(corr_imgs.to(device),
                     rots.to(device),
                     trans.to(device),
