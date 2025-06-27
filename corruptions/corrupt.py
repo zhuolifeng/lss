@@ -5,6 +5,7 @@ import random
 from .noise import NoiseCorruption
 from .attack import AdversarialAttack
 from .attack_classic import ClassicAdversarialAttack
+from .dag_attack import DAGBEVAttack
 
 
 class ImageCorruption:
@@ -18,8 +19,8 @@ class ImageCorruption:
             model: 目标模型 (用于对抗攻击)
         """
         self.noise_corruption = NoiseCorruption()
-        self.adversarial_attack = AdversarialAttack(model)
         self.classic_adversarial_attack = ClassicAdversarialAttack(model)
+        self.dag_bev_attack = DAGBEVAttack(model)
     
     def apply_noise_corruption(self, images, intensity):
         """
@@ -42,20 +43,21 @@ class ImageCorruption:
         
         return images
 
-    def apply_attack_corruption(self, images, rots, trans, intrins, post_rots, post_trans, binimgs, intensity):
-        """
-        应用对抗攻击到图像上 - 随机选择3张图像进行攻击
-        
-        Args:
-            images: 输入图像 (S, C, H, W) torch.Tensor, S=6
-            rots, trans, intrins, post_rots, post_trans, binimgs: 对应的参数
-            intensity: 攻击强度 'low', 'medium', 'high' 或具体参数字典
-            
-        Returns:
-            应用攻击后的图像 (S, C, H, W) torch.Tensor (3张被攻击,3张保持原样)
-        """
-        return self.adversarial_attack.apply_random_attack(images, rots, trans, intrins, post_rots, post_trans, binimgs, intensity=intensity)
-        #return self.classic_adversarial_attack.apply_random_attack(images, rots, trans, intrins, post_rots, post_trans, binimgs, intensity=intensity)
+    def apply_fgsm_attack(self, images, rots, trans, intrins, post_rots, post_trans, binimgs, intensity):
+        """应用FGSM攻击"""
+        return self.classic_adversarial_attack.apply_fgsm_attack(images, rots, trans, intrins, post_rots, post_trans, binimgs, intensity=intensity)
+    
+    def apply_pgd_attack(self, images, rots, trans, intrins, post_rots, post_trans, binimgs, intensity):
+        """应用PGD攻击"""
+        return self.classic_adversarial_attack.apply_pgd_attack(images, rots, trans, intrins, post_rots, post_trans, binimgs, intensity=intensity)
+    
+    def apply_cw_attack(self, images, rots, trans, intrins, post_rots, post_trans, binimgs, intensity):
+        """应用C&W攻击"""
+        return self.classic_adversarial_attack.apply_cw_attack(images, rots, trans, intrins, post_rots, post_trans, binimgs, intensity=intensity)
+    
+    def apply_dag_attack(self, images, rots, trans, intrins, post_rots, post_trans, binimgs, intensity):
+        """应用DAG攻击"""
+        return self.dag_bev_attack.apply_dag_attack(images, rots, trans, intrins, post_rots, post_trans, binimgs, intensity=intensity)
     
     def apply_corruption(self, images, rots, trans, intrins, post_rots, post_trans, binimgs, type, intensity):
         """
@@ -75,9 +77,16 @@ class ImageCorruption:
         for i in range(B):
             if type == 'noise':
                 images[i] = self.apply_noise_corruption(images[i], intensity=intensity)
-            elif type == 'attack':
-                #pass
-                images[i] = self.apply_attack_corruption(images[i], rots[i], trans[i], intrins[i], post_rots[i], post_trans[i], binimgs[i], intensity=intensity)
+            elif type == 'fgsm':
+                images[i] = self.apply_fgsm_attack(images[i], rots[i], trans[i], intrins[i], post_rots[i], post_trans[i], binimgs[i], intensity=intensity)
+            elif type == 'pgd':
+                images[i] = self.apply_pgd_attack(images[i], rots[i], trans[i], intrins[i], post_rots[i], post_trans[i], binimgs[i], intensity=intensity)
+            elif type == 'cw':
+                images[i] = self.apply_cw_attack(images[i], rots[i], trans[i], intrins[i], post_rots[i], post_trans[i], binimgs[i], intensity=intensity)
+            elif type == 'dag':
+                images[i] = self.apply_dag_attack(images[i], rots[i], trans[i], intrins[i], post_rots[i], post_trans[i], binimgs[i], intensity=intensity)
+            elif type == 'origin':
+                pass
             else:
                 raise ValueError(f"Invalid corruption type: {type}")
         return images

@@ -260,7 +260,7 @@ def get_val_info(model, valloader, loss_fn, device, use_tqdm=False):
         # torch.Size([4, 1, 200, 200])    # BEV标签
         
         # 攻击需要梯度，所以不使用no_grad
-        corrputed_images = imagecorruption.apply_corruption(allimgs.to(device), rots.to(device), trans.to(device), intrins.to(device), post_rots.to(device), post_trans.to(device), binimgs.to(device), type='noise', intensity='medium')
+        corrputed_images = imagecorruption.apply_corruption(allimgs.to(device), rots.to(device), trans.to(device), intrins.to(device), post_rots.to(device), post_trans.to(device), binimgs.to(device), type='cw', intensity='medium')
         
         with torch.no_grad():
             corrputed_preds = model(corrputed_images.to(device), rots.to(device),

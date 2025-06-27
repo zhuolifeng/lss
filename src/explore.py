@@ -326,7 +326,7 @@ def viz_model_preds(version,
     corrupt = ImageCorruption(model)
     for batchi, (imgs, rots, trans, intrins, post_rots, post_trans, binimgs) in enumerate(loader):
         # 攻击需要梯度计算，所以不在no_grad中
-        corr_imgs = corrupt.apply_corruption(imgs.to(device), rots.to(device), trans.to(device), intrins.to(device), post_rots.to(device), post_trans.to(device), binimgs.to(device), type='noise', intensity='medium')
+        corr_imgs = corrupt.apply_corruption(imgs.to(device), rots.to(device), trans.to(device), intrins.to(device), post_rots.to(device), post_trans.to(device), binimgs.to(device), type='cw', intensity='medium')
         
         # 推理时使用no_grad
         with torch.no_grad():

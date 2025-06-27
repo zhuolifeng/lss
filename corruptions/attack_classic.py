@@ -6,138 +6,116 @@ from typing import Optional, Callable
 
 class ClassicAdversarialAttack:
     """
-    经典版本的对抗攻击实现 - FGSM和PGD的原始版本
+    经典版本的对抗攻击实现 - 简化版，直接在原始图像空间操作
     """
     def __init__(self, model):
         self.model = model
-        # 常见模型（如 ImageNet）使用的标准化参数
-        self.mean = torch.tensor([0.485, 0.456, 0.406]).view(1, 1, 3, 1, 1)
-        self.std = torch.tensor([0.229, 0.224, 0.225]).view(1, 1, 3, 1, 1)
-
-    def normalize(self, images: torch.Tensor) -> torch.Tensor:
-        """将 [0,255] 图像归一化到模型所需的分布"""
-        images = images.float() / 255.0
-        return (images - self.mean.to(images.device)) / self.std.to(images.device)
-
-    def denormalize(self, images: torch.Tensor) -> torch.Tensor:
-        """从模型分布反归一化回 [0,1] 再转 0~255"""
-        images = images * self.std.to(images.device) + self.mean.to(images.device)
-        images = torch.clamp(images, 0, 1)
-        return (images * 255.0).round().byte()
-
-    def denormalize_image(self, image: torch.Tensor) -> torch.Tensor:
-        """将[0,1]范围的图像转换回[0,255]整数格式"""
-        return torch.clamp(image * 255, 0, 255).byte()
 
     def classic_fgsm_attack(self, images, rots, trans, intrins, post_rots, post_trans, binimgs,
                            epsilon=2/255):
         """
-        经典FGSM攻击实现 - 增强版
-        使用组合损失来更有效地降低IoU
+        经典FGSM攻击实现 - 简化版，直接在原始图像空间操作
         """
-        print(f"[经典FGSM] epsilon: {epsilon:.6f} (像素级: {epsilon*255:.1f}/255)")
+        print(f"[经典FGSM] epsilon: {epsilon:.6f}")
         
-        # 转换epsilon到归一化空间 - 使用更精确的转换
-        eps_normalized = epsilon / torch.tensor([0.229, 0.224, 0.225]).to(images.device).view(1, 3, 1, 1)
+        # 确保输入张量的维度正确
+        # images: (S, C, H, W) -> (1, S, C, H, W) 添加批次维度
+        if len(images.shape) == 4:
+            images = images.unsqueeze(0)  # 添加批次维度
+        if len(rots.shape) == 2:
+            rots = rots.unsqueeze(0)
+        if len(trans.shape) == 2:
+            trans = trans.unsqueeze(0)
+        if len(intrins.shape) == 3:
+            intrins = intrins.unsqueeze(0)
+        if len(post_rots.shape) == 3:
+            post_rots = post_rots.unsqueeze(0)
+        if len(post_trans.shape) == 2:
+            post_trans = post_trans.unsqueeze(0)
+        if len(binimgs.shape) == 3:
+            binimgs = binimgs.unsqueeze(0)
         
-        # 输入images已经是归一化后的张量
-        images_tensor = images.unsqueeze(0).clone().detach().requires_grad_(True)
-
+        target = binimgs.float()
+        
+        # 克隆图像并设置梯度计算
+        input_images = images.clone().detach().requires_grad_(True)
+        
         # 前向传播
-        output = self.model(images_tensor, rots.unsqueeze(0), trans.unsqueeze(0),
-                           intrins.unsqueeze(0), post_rots.unsqueeze(0), post_trans.unsqueeze(0))
+        outputs = self.model(input_images, rots, trans, intrins, post_rots, post_trans)
         
-        # 使用更有效的损失组合
-        target = binimgs.unsqueeze(0).float()
+        # 计算损失
+        pred = outputs.sigmoid()
         
-        # 1. 标准二元交叉熵损失
-        loss_ce = F.binary_cross_entropy_with_logits(output, target)
+        # 1. 二元交叉熵损失
+        loss_ce = F.binary_cross_entropy_with_logits(outputs, target)
         
-        # 2. 直接的IoU损失 - 这是关键！
-        pred = output.sigmoid()
+        # 2. IoU损失 (我们希望最小化IoU来降低分割准确性)
         intersection = (pred * target).sum(dim=(2, 3))
         union = pred.sum(dim=(2, 3)) + target.sum(dim=(2, 3)) - intersection
         iou = intersection / (union + 1e-8)
-        loss_iou = iou.mean()  # 我们想最大化这个损失（最小化IoU）
+        loss_iou = iou.mean()
         
-        # 3. 针对车辆区域的抑制
-        vehicle_mask = target
-        loss_suppress = (pred * vehicle_mask).mean()
+        # 3. 车辆抑制损失 (鼓励在车辆区域产生错误预测)
+        loss_suppress = (pred * target).mean()
         
-        # 组合损失 - 主要依靠IoU损失
-        total_loss = loss_ce - 2.0 * loss_iou + loss_suppress
+        # 组合损失：BCE + 反向IoU + 车辆抑制
+        total_loss = loss_ce - 2.0 * loss_iou + 1.5 * loss_suppress
         
-        # 计算原始IoU
-        with torch.no_grad():
-            orig_iou = iou.mean().item()
-            print(f"[经典FGSM] 原始IoU: {orig_iou:.4f}")
-        
-        # 计算梯度
+        # 反向传播计算梯度
         total_loss.backward()
         
-        # FGSM核心：epsilon * sign(gradient)
-        data_grad = images_tensor.grad.data
-        sign_data_grad = data_grad.sign()
-        
         # 生成对抗样本
-        perturbed_image = images_tensor + eps_normalized * sign_data_grad
-        
-        # 简单裁剪到合理范围（经典版本的唯一约束）
-        perturbed_image = torch.clamp(perturbed_image, 
-                                    images_tensor - eps_normalized, 
-                                    images_tensor + eps_normalized)
-        
-        # 计算攻击后的IoU
         with torch.no_grad():
-            attacked_output = self.model(perturbed_image, rots.unsqueeze(0), trans.unsqueeze(0),
-                                       intrins.unsqueeze(0), post_rots.unsqueeze(0), post_trans.unsqueeze(0))
-            attacked_pred = attacked_output.sigmoid()
-            attacked_intersection = (attacked_pred * target).sum(dim=(2, 3))
-            attacked_union = attacked_pred.sum(dim=(2, 3)) + target.sum(dim=(2, 3)) - attacked_intersection
-            attacked_iou = (attacked_intersection / (attacked_union + 1e-8)).mean().item()
-            print(f"[经典FGSM] 攻击后IoU: {attacked_iou:.4f} (下降: {orig_iou - attacked_iou:.4f})")
-        
-        # 计算扰动统计
-        diff = (perturbed_image - images_tensor).abs()
-        max_diff = diff.max()
-        mean_diff = diff.mean()
-        
-        # 计算像素级差异（转换到[0,1]空间）
-        orig_img_01 = images_tensor * self.std.to(images_tensor.device) + self.mean.to(images_tensor.device)
-        adv_img_01 = perturbed_image * self.std.to(perturbed_image.device) + self.mean.to(perturbed_image.device)
-        pixel_diff = (adv_img_01 - orig_img_01).abs() * 255
-        max_pixel_diff = pixel_diff.max()
-        mean_pixel_diff = pixel_diff.mean()
-        
-        print(f"[经典FGSM] 归一化空间扰动 - 最大: {max_diff:.6f}, 平均: {mean_diff:.6f}")
-        print(f"[经典FGSM] 像素级差异 - 最大: {max_pixel_diff:.2f}/255 ({max_pixel_diff/255*100:.2f}%), 平均: {mean_pixel_diff:.2f}/255")
-        
+            sign_data_grad = input_images.grad.sign()
+            perturbed_image = input_images + epsilon * sign_data_grad
+            
+            # 统计信息
+            final_pred = self.model(perturbed_image, rots, trans, intrins, post_rots, post_trans).sigmoid()
+            final_intersection = (final_pred * target).sum(dim=(2, 3))
+            final_union = final_pred.sum(dim=(2, 3)) + target.sum(dim=(2, 3)) - final_intersection
+            final_iou = (final_intersection / (final_union + 1e-8)).mean().item()
+            orig_iou = loss_iou.item()
+            print(f"[经典FGSM] 原始IoU: {orig_iou:.4f} -> 攻击后IoU: {final_iou:.4f}")
+             
+        # 返回时移除批次维度
         return perturbed_image.squeeze(0)
 
     def classic_pgd_attack(self, images, rots, trans, intrins, post_rots, post_trans, binimgs,
                           epsilon=2/255, alpha=0.5/255, num_steps=10):
         """
-        经典PGD攻击实现 - 增强版
-        多步迭代攻击，使用IoU导向的损失
+        经典PGD攻击实现 - 简化版，直接在原始图像空间操作
         """
         print(f"[经典PGD] epsilon: {epsilon:.6f}, alpha: {alpha:.6f}, steps: {num_steps}")
         
-        # 转换到归一化空间 - 使用更精确的转换
-        eps_normalized = epsilon / torch.tensor([0.229, 0.224, 0.225]).to(images.device).view(1, 3, 1, 1)
-        alpha_normalized = alpha / torch.tensor([0.229, 0.224, 0.225]).to(images.device).view(1, 3, 1, 1)
+        # 确保输入张量的维度正确
+        # images: (S, C, H, W) -> (1, S, C, H, W) 添加批次维度
+        if len(images.shape) == 4:
+            images = images.unsqueeze(0)  # 添加批次维度
+        if len(rots.shape) == 2:
+            rots = rots.unsqueeze(0)
+        if len(trans.shape) == 2:
+            trans = trans.unsqueeze(0)
+        if len(intrins.shape) == 3:
+            intrins = intrins.unsqueeze(0)
+        if len(post_rots.shape) == 3:
+            post_rots = post_rots.unsqueeze(0)
+        if len(post_trans.shape) == 2:
+            post_trans = post_trans.unsqueeze(0)
+        if len(binimgs.shape) == 3:
+            binimgs = binimgs.unsqueeze(0)
         
-        images_tensor = images.unsqueeze(0).clone().detach()
-        target = binimgs.unsqueeze(0).float()
+        target = binimgs.float()
+        
+        # 克隆原始图像并分离计算图，避免梯度冲突
+        original_images = images.clone().detach()
         
         # 随机初始化扰动
-        delta = torch.zeros_like(images_tensor).uniform_(-epsilon, epsilon) 
-        delta = delta * eps_normalized / epsilon  # 调整到归一化空间
+        delta = torch.zeros_like(original_images).uniform_(-epsilon, epsilon) 
         delta.requires_grad_(True)
         
         # 计算原始IoU
         with torch.no_grad():
-            original_output = self.model(images_tensor, rots.unsqueeze(0), trans.unsqueeze(0),
-                                       intrins.unsqueeze(0), post_rots.unsqueeze(0), post_trans.unsqueeze(0))
+            original_output = self.model(original_images, rots, trans, intrins, post_rots, post_trans)
             orig_pred = original_output.sigmoid()
             orig_intersection = (orig_pred * target).sum(dim=(2, 3))
             orig_union = orig_pred.sum(dim=(2, 3)) + target.sum(dim=(2, 3)) - orig_intersection
@@ -150,9 +128,11 @@ class ClassicAdversarialAttack:
             if delta.grad is not None:
                 delta.grad.zero_()
             
+            # 创建当前的对抗样本（每次都重新创建计算图）
+            perturbed_images = original_images + delta
+            
             # 前向传播
-            output = self.model(images_tensor + delta, rots.unsqueeze(0), trans.unsqueeze(0),
-                               intrins.unsqueeze(0), post_rots.unsqueeze(0), post_trans.unsqueeze(0))
+            output = self.model(perturbed_images, rots, trans, intrins, post_rots, post_trans)
             
             # 使用IoU导向的损失
             pred = output.sigmoid()
@@ -176,146 +156,196 @@ class ClassicAdversarialAttack:
             # 组合损失
             total_loss = loss_ce - 3.0 * loss_iou + 2.0 * loss_suppress + 1.0 * loss_false_positive
             
-            # 反向传播
+            # 反向传播（只针对delta）
             total_loss.backward()
             
             # PGD更新：delta = delta + alpha * sign(gradient)
-            delta.data = delta.data + alpha_normalized * delta.grad.sign()
-            
-            # 投影到L∞球内
-            delta.data = torch.clamp(delta.data, -eps_normalized, eps_normalized)
-            
-            # 确保攻击后的图像在合理范围内
-            delta.data = torch.clamp(images_tensor + delta.data, 0, 1) - images_tensor
+            with torch.no_grad():
+                delta.data = delta.data + alpha * delta.grad.sign()
+                
+                # 投影到L∞球内
+                delta.data = torch.clamp(delta.data, -epsilon, epsilon)
             
             if step % 3 == 0:
                 current_iou = iou.mean().item()
                 print(f"[经典PGD] Step {step}: IoU = {current_iou:.4f}")
         
         # 生成最终对抗样本
-        perturbed_image = images_tensor + delta
-        
-        # 计算最终IoU
         with torch.no_grad():
-            final_output = self.model(perturbed_image, rots.unsqueeze(0), trans.unsqueeze(0),
-                                    intrins.unsqueeze(0), post_rots.unsqueeze(0), post_trans.unsqueeze(0))
+            final_perturbed_image = original_images + delta
+            
+            # 计算最终IoU
+            final_output = self.model(final_perturbed_image, rots, trans, intrins, post_rots, post_trans)
             final_pred = final_output.sigmoid()
             final_intersection = (final_pred * target).sum(dim=(2, 3))
             final_union = final_pred.sum(dim=(2, 3)) + target.sum(dim=(2, 3)) - final_intersection
             final_iou = (final_intersection / (final_union + 1e-8)).mean().item()
             print(f"[经典PGD] 最终IoU: {final_iou:.4f} (下降: {orig_iou - final_iou:.4f})")
+            
+            # 扰动统计
+            diff = delta.abs()
+            max_diff = diff.max()
+            mean_diff = diff.mean()
+            
+            print(f"[经典PGD] 扰动统计 - 最大: {max_diff:.6f}, 平均: {mean_diff:.6f}")
         
-        # 扰动统计
-        diff = delta.abs()
-        max_diff = diff.max()
-        mean_diff = diff.mean()
-        
-        # 计算像素级差异（转换到[0,1]空间）
-        orig_img_01 = images_tensor * self.std.to(images_tensor.device) + self.mean.to(images_tensor.device)
-        adv_img_01 = perturbed_image * self.std.to(perturbed_image.device) + self.mean.to(perturbed_image.device)
-        pixel_diff = (adv_img_01 - orig_img_01).abs() * 255
-        max_pixel_diff = pixel_diff.max()
-        mean_pixel_diff = pixel_diff.mean()
-        
-        print(f"[经典PGD] 归一化空间扰动 - 最大: {max_diff:.6f}, 平均: {mean_diff:.6f}")
-        print(f"[经典PGD] 像素级差异 - 最大: {max_pixel_diff:.2f}/255 ({max_pixel_diff/255*100:.2f}%), 平均: {mean_pixel_diff:.2f}/255")
-        
-        return perturbed_image.squeeze(0)
+        # 返回时移除批次维度
+        return final_perturbed_image.squeeze(0)
 
     def c_w_attack(self, images, rots, trans, intrins, post_rots, post_trans, binimgs,
-                   c=1.0, kappa=0, max_iter=100, learning_rate=0.01):
+                   c=1.0, kappa=0.2, max_iter=100, learning_rate=0.01, epsilon=8/255):
         """
-        经典C&W攻击实现
-        使用L2范数约束的优化攻击
+        经典C&W攻击实现 - 简化版，避免tanh变换导致的图像变暗问题
+        
+        C&W攻击原理：
+        - 将对抗样本生成转化为优化问题：minimize ||δ||_2 + c * f(x+δ)
+        - 直接优化扰动δ，避免复杂的变量替换
+        - f(x+δ) 是攻击目标函数，当攻击成功时 f(x+δ) ≤ 0
+        - 通过epsilon约束确保扰动不可见
         """
-        print(f"[经典C&W] c: {c}, kappa: {kappa}, max_iter: {max_iter}")
+        print(f"[经典C&W] c: {c}, kappa: {kappa}, max_iter: {max_iter}, epsilon: {epsilon:.6f}")
         
-        images_tensor = images.unsqueeze(0).clone().detach()
-        batch_size = images_tensor.size(0)
+        # 确保输入张量的维度正确
+        if len(images.shape) == 4:
+            images = images.unsqueeze(0)
+        if len(rots.shape) == 2:
+            rots = rots.unsqueeze(0)
+        if len(trans.shape) == 2:
+            trans = trans.unsqueeze(0)
+        if len(intrins.shape) == 3:
+            intrins = intrins.unsqueeze(0)
+        if len(post_rots.shape) == 3:
+            post_rots = post_rots.unsqueeze(0)
+        if len(post_trans.shape) == 2:
+            post_trans = post_trans.unsqueeze(0)
+        if len(binimgs.shape) == 3:
+            binimgs = binimgs.unsqueeze(0)
         
-        # 初始化扰动变量w，使用arctanh变换确保图像在[0,1]范围内
-        w = torch.zeros_like(images_tensor, requires_grad=True)
-        optimizer = torch.optim.Adam([w], lr=learning_rate)
+        batch_size = images.size(0)
+        target_probs = binimgs.float()
         
-        # 将图像转换到arctanh空间
-        def to_tanh_space(x):
-            return torch.atanh((x - 0.5) * 1.99999)  # 避免arctanh的数值问题
+        # 保存原始图像，不改变其数值范围
+        original_images = images.clone().detach()
         
-        def from_tanh_space(x):
-            return torch.tanh(x) * 0.5 + 0.5
+        # 检测图像的实际数值范围
+        img_min = original_images.min().item()
+        img_max = original_images.max().item()
+        print(f"[经典C&W] 图像数值范围: [{img_min:.3f}, {img_max:.3f}]")
         
-        original_images_tanh = to_tanh_space(images_tensor)
+        # 计算原始IoU作为基线
+        with torch.no_grad():
+            orig_outputs = self.model(original_images, rots, trans, intrins, post_rots, post_trans)
+            orig_probs = torch.sigmoid(orig_outputs)
+            orig_intersection = (orig_probs * target_probs).sum(dim=(2, 3))
+            orig_union = orig_probs.sum(dim=(2, 3)) + target_probs.sum(dim=(2, 3)) - orig_intersection
+            orig_iou = (orig_intersection / (orig_union + 1e-8)).mean().item()
+            print(f"[经典C&W] 原始IoU: {orig_iou:.4f}")
+        
+        # 修复的C&W变量替换：直接优化扰动δ，然后投影到epsilon球内
+        # 初始化小的随机扰动
+        delta = torch.zeros_like(original_images, requires_grad=True)
+        optimizer = torch.optim.Adam([delta], lr=learning_rate)
         
         best_l2 = float('inf')
-        best_attack = images_tensor.clone()
+        best_attack = original_images.clone()
+        best_iou = orig_iou
         
         print(f"[经典C&W] 开始优化...")
         
         for iteration in range(max_iter):
             optimizer.zero_grad()
             
-            # 从tanh空间生成对抗样本
-            adv_images = from_tanh_space(original_images_tanh + w)
+            # 生成对抗样本：原始图像 + 限制幅度的扰动
+            clamped_delta = torch.clamp(delta, -epsilon, epsilon)
+            adv_images = original_images + clamped_delta
+            
+            # 根据原始图像的数值范围进行合理的限制
+            # 不强制限制到[0,1]，而是保持在合理范围内
+            adv_images = torch.clamp(adv_images, img_min - epsilon, img_max + epsilon)
             
             # 前向传播
-            outputs = self.model(adv_images, rots.unsqueeze(0), trans.unsqueeze(0),
-                                intrins.unsqueeze(0), post_rots.unsqueeze(0), post_trans.unsqueeze(0))
-            
-            # C&W损失函数
-            # L2距离项
-            l2_dist = torch.norm((adv_images - images_tensor).view(batch_size, -1), dim=1)
-            
-            # 攻击成功项 (对于分割任务，我们希望降低IoU)
+            outputs = self.model(adv_images, rots, trans, intrins, post_rots, post_trans)
             probs = torch.sigmoid(outputs)
-            target_probs = binimgs.unsqueeze(0).float()
             
-            # 计算IoU损失（希望最小化IoU）
+            # 计算IoU
             intersection = (probs * target_probs).sum(dim=(2, 3))
             union = probs.sum(dim=(2, 3)) + target_probs.sum(dim=(2, 3)) - intersection
             iou = intersection / (union + 1e-8)
+            mean_iou = iou.mean()
             
-            # C&W的f函数：我们希望攻击成功（IoU降低）
-            f = iou.mean() - kappa  # 当IoU < kappa时攻击成功
+            # L2距离（实际扰动）
+            actual_perturbation = adv_images - original_images
+            l2_dist = torch.norm(actual_perturbation.view(batch_size, -1), dim=1)
             
-            # 总损失
-            loss = l2_dist.mean() + c * torch.max(torch.tensor(0.0, device=f.device), f)
+            # C&W损失函数
+            # f(x) = IoU - target_iou，当IoU < target_iou时攻击成功
+            target_iou = orig_iou * (1.0 - kappa)  # 目标IoU降低kappa比例
+            f = mean_iou - target_iou
+            
+            # 总损失：L2距离 + c * max(0, f)
+            loss = l2_dist.mean() + c * torch.clamp(f, min=0)
             
             loss.backward()
             optimizer.step()
             
-            # 记录最佳结果
-            current_l2 = l2_dist.mean().item()
-            if current_l2 < best_l2 and f.item() <= 0:
-                best_l2 = current_l2
-                best_attack = adv_images.clone()
+            # 投影到epsilon球内（保持扰动不可见）
+            with torch.no_grad():
+                delta.data = torch.clamp(delta.data, -epsilon, epsilon)
             
-            if iteration % 20 == 0:
-                print(f"[经典C&W] Iter {iteration}: L2={current_l2:.4f}, f={f.item():.4f}, IoU={iou.mean().item():.4f}")
+            # 记录最佳结果
+            with torch.no_grad():
+                current_l2 = l2_dist.mean().item()
+                current_iou = mean_iou.item()
+                
+                # 如果IoU下降且L2距离合理，更新最佳攻击
+                if current_iou < best_iou or (current_iou <= best_iou and current_l2 < best_l2):
+                    best_iou = current_iou
+                    best_attack = adv_images.clone()
+                    best_l2 = current_l2
+                
+                if iteration % 20 == 0:
+                    iou_drop = orig_iou - current_iou
+                    perturbation_max = actual_perturbation.abs().max().item()
+                    print(f"[经典C&W] Iter {iteration}: L2={current_l2:.4f}, IoU={current_iou:.4f} (下降:{iou_drop:.4f}), "
+                          f"最大扰动={perturbation_max:.6f}, f={f.item():.4f}")
         
-        print(f"[经典C&W] 完成! 最佳L2距离: {best_l2:.6f}")
+        final_iou_drop = orig_iou - best_iou
+        print(f"[经典C&W] 完成! 最佳IoU下降: {final_iou_drop:.4f}, L2距离: {best_l2:.6f}")
+        
+        # 计算扰动统计
+        with torch.no_grad():
+            final_perturbation = best_attack - original_images
+            max_diff = final_perturbation.abs().max().item()
+            mean_diff = final_perturbation.abs().mean().item()
+            
+            # 检查扰动是否在可接受范围内
+            if max_diff <= epsilon * 1.1:  # 允许小的数值误差
+                print(f"[经典C&W] ✅ 扰动在可接受范围内 - 最大: {max_diff:.6f} (限制: {epsilon:.6f}), 平均: {mean_diff:.6f}")
+            else:
+                print(f"[经典C&W] ⚠️  扰动超出范围 - 最大: {max_diff:.6f} (限制: {epsilon:.6f}), 平均: {mean_diff:.6f}")
         
         return best_attack.squeeze(0)
 
     def apply_random_attack(self, images, rots, trans, intrins, post_rots, post_trans, binimgs,
                            intensity) -> torch.Tensor:
         """
-        应用经典随机攻击，保持与corrupt.py的接口一致
+        应用经典随机攻击，简化版本
         """
-        # 经典攻击的配置（使用更小的epsilon值来减少可见性）
+        # 经典攻击的配置
         configs = {
             'low': {
                 'method': 'fgsm',
-                'epsilon': 1/255,  # 更小的扰动
+                'epsilon': 1/255,
             },
             'medium': {
                 'method': 'pgd',
-                'epsilon': 2/255,  # 中等扰动
-                'alpha': 0.5/255,  # 更小的步长
+                'epsilon': 2/255,
+                'alpha': 0.5/255,
                 'steps': 10
             },
             'high': {
                 'method': 'cw',
-                'c': 0.5,  # 减小C&W的c参数
+                'c': 0.5,
                 'max_iter': 50
             }
         }
@@ -337,3 +367,50 @@ class ClassicAdversarialAttack:
                                  c=cfg['c'], max_iter=cfg['max_iter'])
         else:
             raise ValueError(f"未知的攻击方法: {cfg['method']}") 
+
+
+    def apply_fgsm_attack(self, images, rots, trans, intrins, post_rots, post_trans, binimgs,
+                           intensity='medium'):
+        """
+        应用FGSM攻击
+        """
+        # 根据强度设置参数
+        epsilon_configs = {
+            'low': 1/255,
+            'medium': 2/255, 
+            'high': 4/255
+        }
+        epsilon = epsilon_configs.get(intensity, 2/255)
+        return self.classic_fgsm_attack(images, rots, trans, intrins, post_rots, post_trans, binimgs, 
+                                        epsilon=epsilon)
+        
+    def apply_pgd_attack(self, images, rots, trans, intrins, post_rots, post_trans, binimgs,
+                          intensity='medium'):
+        """
+        应用PGD攻击
+        """
+        # 根据强度设置参数
+        configs = {
+            'low': {'epsilon': 1/255, 'alpha': 0.3/255, 'num_steps': 5},
+            'medium': {'epsilon': 2/255, 'alpha': 0.5/255, 'num_steps': 10},
+            'high': {'epsilon': 4/255, 'alpha': 1/255, 'num_steps': 15}
+        }
+        cfg = configs.get(intensity, configs['medium'])
+        return self.classic_pgd_attack(images, rots, trans, intrins, post_rots, post_trans, binimgs, 
+                                       epsilon=cfg['epsilon'], alpha=cfg['alpha'], num_steps=cfg['num_steps'])
+        
+    def apply_cw_attack(self, images, rots, trans, intrins, post_rots, post_trans, binimgs, 
+                        intensity='medium'):
+        """
+        应用C&W攻击
+        """
+        # 根据强度设置参数
+        configs = {
+            'low': {'c': 0.5, 'kappa': 0.1, 'max_iter': 50, 'epsilon': 4/255},
+            'medium': {'c': 1.0, 'kappa': 0.2, 'max_iter': 80, 'epsilon': 8/255},
+            'high': {'c': 2.0, 'kappa': 0.3, 'max_iter': 100, 'epsilon': 16/255}
+        }
+        cfg = configs.get(intensity, configs['medium'])
+        return self.c_w_attack(images, rots, trans, intrins, post_rots, post_trans, binimgs, 
+                               c=cfg['c'], kappa=cfg['kappa'], max_iter=cfg['max_iter'], epsilon=cfg['epsilon'])
+        
