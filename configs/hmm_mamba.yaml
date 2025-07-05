@@ -1,0 +1,192 @@
+# HMM插件配置 - Mamba架构
+# 适用于高效的状态空间模型-based diffusion training
+
+# 实验配置
+experiment_name: "hmm_mamba_efficient"
+output_dir: "./experiments"
+data_root: "./data"
+wandb_project: "hmm-plugin"
+
+# 训练配置
+batch_size: 20  # Mamba内存效率更高
+num_epochs: 120
+learning_rate: 3e-4
+weight_decay: 5e-5
+gradient_clip_value: 1.0
+num_workers: 8
+sequence_length: 8  # Mamba适合更长序列
+feature_dim: 64
+num_cameras: 6
+
+# 设备配置
+device: "cuda"
+use_amp: true
+seed: 42
+
+# 调度器配置
+scheduler_type: "cosine"
+warmup_epochs: 8
+min_lr: 1e-7
+
+# 检查点配置
+save_every: 12
+keep_last_k_checkpoints: 4
+early_stopping: true
+patience: 25
+min_delta: 1e-5
+
+# 日志配置
+log_every: 8
+eval_every: 60
+use_tensorboard: true
+
+# 损失权重
+reconstruction_weight: 1.0
+kl_weight: 0.12
+consistency_weight: 0.55
+perceptual_weight: 0.15
+temporal_weight: 0.2  # Mamba对时序建模更强
+
+# HMM插件配置
+hmm_config:
+  # 基础配置
+  input_dim: 64
+  hidden_dim: 192  # Mamba使用适中的隐藏维度
+  action_dim: 4
+  
+  # Transition1配置 (Mamba)
+  transition1_type: "diffusion"
+  transition1_config:
+    model_type: "mamba"
+    hidden_dim: 192
+    num_layers: 8
+    state_dim: 64
+    expand_factor: 2
+    dropout: 0.1
+    
+    # Mamba特定配置
+    dt_rank: 8
+    dt_min: 0.001
+    dt_max: 0.1
+    dt_init: "random"
+    dt_scale: 1.0
+    
+    # 状态空间配置
+    d_state: 64
+    d_conv: 4
+    conv_bias: true
+    bias: false
+    
+    # 选择性机制
+    use_selective_scan: true
+    selective_scan_backend: "triton"
+    
+    # Diffusion配置
+    num_diffusion_steps: 150
+    beta_start: 0.0001
+    beta_end: 0.02
+    beta_schedule: "cosine"
+    use_cfg: true
+    cfg_strength: 1.2
+    
+    # 条件配置
+    condition_dim: 196  # hidden_dim + action_dim
+    condition_type: "selective"  # 选择性条件
+    
+    # 时间嵌入
+    time_embedding_type: "learnable"
+    time_embedding_dim: 192
+    
+  # Transition2配置 (Mamba-based Multi-modal)
+  transition2_type: "multimodal"
+  transition2_config:
+    model_type: "mamba"
+    hidden_dim: 192
+    num_layers: 6
+    state_dim: 48
+    expand_factor: 2
+    dropout: 0.1
+    
+    # 多模态Mamba配置
+    modality_dims: [64, 64, 4]  # [lift_dim, splat_dim, action_dim]
+    modality_fusion: "selective_scan"
+    use_modality_embeddings: true
+    
+    # 跨模态状态共享
+    cross_modal_state_sharing: true
+    shared_state_dim: 32
+    
+    # 选择性融合
+    selective_fusion_layers: [2, 4]
+    fusion_gate_type: "learnable"
+    
+  # 融合配置
+  fusion_strategy: "adaptive"
+  fusion_config:
+    learnable_weights: true
+    weight_init: "kaiming"
+    temperature: 1.5
+    
+    # 自适应融合
+    adaptive_fusion_type: "mamba_gate"
+    fusion_state_dim: 32
+    fusion_dropout: 0.1
+    
+    # 质量评估
+    use_quality_assessment: true
+    quality_dim: 48
+    quality_layers: 2
+    
+  # 内存配置
+  memory_config:
+    max_history_length: 20  # Mamba支持更长历史
+    memory_dim: 96
+    use_memory_attention: false  # Mamba不需要attention
+    memory_decay: 0.92
+    
+    # 状态记忆
+    use_state_memory: true
+    state_memory_dim: 64
+    state_memory_layers: 2
+    
+  # 训练配置
+  training_config:
+    use_teacher_forcing: true
+    teacher_forcing_ratio: 0.4
+    use_curriculum_learning: true
+    curriculum_epochs: 25
+    
+    # Mamba特定训练策略
+    use_gradient_checkpointing: true
+    sequence_parallel: true
+    
+    # 正则化
+    dropout: 0.1
+    weight_decay: 5e-5
+    gradient_clip: 1.0
+    
+    # 损失配置
+    loss_weights:
+      reconstruction: 1.0
+      kl: 0.12
+      consistency: 0.55
+      temporal: 0.2
+      state_reg: 0.05
+      
+  # 推理配置
+  inference_config:
+    use_ema: true
+    ema_decay: 0.999
+    num_samples: 1
+    use_ddim: true
+    ddim_steps: 80
+    
+    # 采样配置
+    sampling_method: "ddim"
+    eta: 0.0
+    use_cfg: true
+    cfg_scale: 1.2
+    
+    # 状态缓存
+    use_state_cache: true
+    cache_length: 64 

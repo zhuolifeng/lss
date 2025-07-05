@@ -11,7 +11,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from src.analyzer_class import run_corruption_analysis
 
 
-def main(dataroot='/dataset/nuscenes', modelf=None, output_dir='./lss_corruption_analysis', 
+def main(dataroot='/dataset/nuscenes', modelf=None, output_dir='./lss_corruption_analysis_five', 
          bsz=1, max_batches=3):
     """运行LSS三步骤干扰影响分析"""
     
@@ -29,6 +29,8 @@ def main(dataroot='/dataset/nuscenes', modelf=None, output_dir='./lss_corruption
     print("- pgd: PGD对抗攻击") 
     print("- cw: C&W对抗攻击")
     print("- dag: DAG稠密对抗攻击")
+    print("- fusion: 场景导向补丁攻击")
+    print("- robust_bev: RobustBEV攻击")
     print()
     
     # 检查数据路径
@@ -71,7 +73,7 @@ def main(dataroot='/dataset/nuscenes', modelf=None, output_dir='./lss_corruption
                 print("2. 或者先训练模型")
                 print("3. 当前分析仍然有效，显示了网络架构对干扰的响应")
                 
-            for corruption_type in ['noise', 'fgsm', 'pgd', 'cw', 'dag']:
+            for corruption_type in ['noise', 'fgsm', 'pgd', 'cw', 'dag', 'fusion', 'robust_bev']:
                 if corruption_type in results[0]:
                     corrupted_iou = results[0][corruption_type]['stats']['shoot']['iou']
                     iou_drop = baseline_iou - corrupted_iou
@@ -110,7 +112,7 @@ if __name__ == "__main__":
                        help='NuScenes数据集路径')
     parser.add_argument('--modelf', default='model525000.pt',
                        help='预训练模型路径 (可选)')
-    parser.add_argument('--output_dir', default='./lss_corruption_analysis_all',
+    parser.add_argument('--output_dir', default='./lss_corruption_analysis_five',
                        help='输出目录')
     parser.add_argument('--bsz', type=int, default=1,
                        help='批量大小')

@@ -52,7 +52,7 @@ class LSSCorruptionAnalyzer:
         self.model.bevencode.register_forward_hook(hook_shoot)  # Shoot步骤：BEV编码器
     
     def analyze_step_by_step(self, images, rots, trans, intrins, post_rots, post_trans, binimgs, 
-                           corruption_types=['origin', 'noise', 'fgsm', 'pgd', 'cw', 'dag']) -> Dict:
+                           corruption_types=['origin', 'noise', 'fgsm', 'pgd', 'cw', 'dag', 'fusion', 'robust_bev']) -> Dict:
         """
         逐步分析LSS三个步骤在不同干扰下的表现
         
@@ -97,7 +97,18 @@ class LSSCorruptionAnalyzer:
                     images, rots, trans, intrins, post_rots, post_trans, binimgs,
                     type='dag', intensity=intensity
                 )
-            
+            elif corruption_type == 'fusion':
+                intensity = 'medium'
+                corrupted_images = self.corruption.apply_corruption(
+                    images, rots, trans, intrins, post_rots, post_trans, binimgs,
+                    type='fusion', intensity=intensity
+                )
+            elif corruption_type == 'robust_bev':
+                intensity = 'medium'
+                corrupted_images = self.corruption.apply_corruption(
+                    images, rots, trans, intrins, post_rots, post_trans, binimgs,
+                    type='robust_bev', intensity=intensity
+                )
             # 清空中间输出
             self.intermediate_outputs.clear()
             
@@ -1299,7 +1310,7 @@ def run_corruption_analysis(version='mini', dataroot='/dataset/nuscenes', modelf
             # 逐步分析
             results = analyzer.analyze_step_by_step(
                 images, rots, trans, intrins, post_rots, post_trans, binimgs,
-                corruption_types=['origin', 'noise', 'fgsm', 'pgd', 'cw', 'dag']
+                corruption_types=['origin', 'noise', 'fgsm', 'pgd', 'cw', 'dag', 'fusion', 'robust_bev']
             )
             
             # 比较分析
@@ -1335,7 +1346,7 @@ def run_corruption_analysis(version='mini', dataroot='/dataset/nuscenes', modelf
             print("⚠️  Baseline IoU is very low, model may be randomly initialized")
             print("Consider using a pre-trained model for more meaningful results")
         
-        for corruption_type in ['noise', 'fgsm', 'pgd', 'cw', 'dag']:
+        for corruption_type in ['noise', 'fgsm', 'pgd', 'cw', 'dag', 'fusion', 'robust_bev']:
             if corruption_type in all_results[0]:
                 corrupted_iou = all_results[0][corruption_type]['stats']['shoot']['iou']
                 iou_drop = baseline_iou - corrupted_iou

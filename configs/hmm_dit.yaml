@@ -1,0 +1,181 @@
+# HMM插件配置 - DiT架构
+# 适用于可扩展的Transformer-based diffusion training
+
+# 实验配置
+experiment_name: "hmm_dit_scalable"
+output_dir: "./experiments"
+data_root: "./data"
+wandb_project: "hmm-plugin"
+
+# 训练配置
+batch_size: 12  # DiT需要更多内存
+num_epochs: 150
+learning_rate: 2e-4
+weight_decay: 1e-4
+gradient_clip_value: 1.0
+num_workers: 8
+sequence_length: 5
+feature_dim: 64
+num_cameras: 6
+
+# 设备配置
+device: "cuda"
+use_amp: true
+seed: 42
+
+# 调度器配置
+scheduler_type: "cosine"
+warmup_epochs: 10
+min_lr: 1e-7
+
+# 检查点配置
+save_every: 15
+keep_last_k_checkpoints: 3
+early_stopping: true
+patience: 30
+min_delta: 1e-5
+
+# 日志配置
+log_every: 5
+eval_every: 50
+use_tensorboard: true
+
+# 损失权重
+reconstruction_weight: 1.0
+kl_weight: 0.15
+consistency_weight: 0.6
+perceptual_weight: 0.2
+temporal_weight: 0.1
+
+# HMM插件配置
+hmm_config:
+  # 基础配置
+  input_dim: 64
+  hidden_dim: 256  # DiT使用更大的隐藏维度
+  action_dim: 4
+  
+  # Transition1配置 (DiT)
+  transition1_type: "diffusion"
+  transition1_config:
+    model_type: "dit"
+    hidden_dim: 256
+    num_layers: 12
+    num_heads: 16
+    dropout: 0.1
+    
+    # DiT特定配置
+    patch_size: 1
+    use_flash_attention: true
+    use_rotary_embedding: true
+    use_rmsnorm: true
+    
+    # Transformer配置
+    activation: "gelu"
+    norm_type: "layer"
+    attention_dropout: 0.1
+    ffn_dropout: 0.1
+    
+    # Diffusion配置
+    num_diffusion_steps: 200
+    beta_start: 0.0001
+    beta_end: 0.02
+    beta_schedule: "cosine"
+    use_cfg: true
+    cfg_strength: 1.5
+    
+    # 条件配置
+    condition_dim: 260  # hidden_dim + action_dim
+    condition_type: "adaLN"  # Adaptive Layer Normalization
+    
+    # 时间嵌入
+    time_embedding_type: "sinusoidal"
+    time_embedding_dim: 256
+    
+  # Transition2配置 (Multi-modal Transformer)
+  transition2_type: "multimodal"
+  transition2_config:
+    model_type: "transformer"
+    hidden_dim: 256
+    num_layers: 8
+    num_heads: 16
+    dropout: 0.1
+    
+    # 多模态配置
+    modality_dims: [64, 64, 4]  # [lift_dim, splat_dim, action_dim]
+    modality_fusion: "cross_attention"
+    use_modality_embeddings: true
+    
+    # 交叉注意力配置
+    cross_attention_layers: [2, 4, 6]
+    cross_attention_heads: 8
+    
+    # 位置编码
+    position_encoding_type: "learned"
+    max_position_embeddings: 512
+    
+  # 融合配置
+  fusion_strategy: "adaptive"
+  fusion_config:
+    learnable_weights: true
+    weight_init: "xavier"
+    temperature: 2.0
+    
+    # 自适应融合
+    adaptive_fusion_type: "attention"
+    fusion_heads: 8
+    fusion_dropout: 0.1
+    
+    # 质量评估
+    use_quality_assessment: true
+    quality_dim: 64
+    quality_layers: 2
+    
+  # 内存配置
+  memory_config:
+    max_history_length: 15
+    memory_dim: 128
+    use_memory_attention: true
+    memory_decay: 0.95
+    
+    # 记忆增强
+    memory_bank_size: 1024
+    memory_update_rate: 0.1
+    
+  # 训练配置
+  training_config:
+    use_teacher_forcing: true
+    teacher_forcing_ratio: 0.3
+    use_curriculum_learning: true
+    curriculum_epochs: 30
+    
+    # 高级训练策略
+    use_ema: true
+    ema_decay: 0.9995
+    use_gradient_checkpointing: true
+    
+    # 正则化
+    dropout: 0.1
+    weight_decay: 1e-4
+    gradient_clip: 1.0
+    
+    # 损失配置
+    loss_weights:
+      reconstruction: 1.0
+      kl: 0.15
+      consistency: 0.6
+      temporal: 0.1
+      attention: 0.05
+      
+  # 推理配置
+  inference_config:
+    use_ema: true
+    ema_decay: 0.9995
+    num_samples: 1
+    use_ddim: true
+    ddim_steps: 100
+    
+    # 采样配置
+    sampling_method: "ddim"
+    eta: 0.0
+    use_cfg: true
+    cfg_scale: 1.5 

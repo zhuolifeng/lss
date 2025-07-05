@@ -11,7 +11,7 @@ class AdversarialAttack:
     def fgsm_attack(self, images, rots, trans, intrins, post_rots, post_trans, binimgs,
                     epsilon=0.025):
         """
-        简化的FGSM攻击，直接在原始图像空间操作
+        简化的FGSM攻击,直接在原始图像空间操作
         """
         S, C, H, W = images.shape
         selected_indices = list(range(S))  # 攻击所有图像

@@ -1,0 +1,143 @@
+# HMM插件配置 - UNet架构
+# 适用于基础的diffusion-based transition training
+
+# 实验配置
+experiment_name: "hmm_unet_base"
+output_dir: "./experiments"
+data_root: "./data"
+wandb_project: "hmm-plugin"
+
+# 训练配置
+batch_size: 16
+num_epochs: 100
+learning_rate: 1e-4
+weight_decay: 1e-5
+gradient_clip_value: 1.0
+num_workers: 8
+sequence_length: 5
+feature_dim: 64
+num_cameras: 6
+
+# 设备配置
+device: "cuda"
+use_amp: true
+seed: 42
+
+# 调度器配置
+scheduler_type: "cosine"
+warmup_epochs: 5
+min_lr: 1e-6
+
+# 检查点配置
+save_every: 10
+keep_last_k_checkpoints: 5
+early_stopping: true
+patience: 20
+min_delta: 1e-4
+
+# 日志配置
+log_every: 10
+eval_every: 100
+use_tensorboard: true
+
+# 损失权重
+reconstruction_weight: 1.0
+kl_weight: 0.1
+consistency_weight: 0.5
+perceptual_weight: 0.1
+temporal_weight: 0.1
+
+# HMM插件配置
+hmm_config:
+  # 基础配置
+  input_dim: 64
+  hidden_dim: 128
+  action_dim: 4
+  
+  # Transition1配置 (UNet)
+  transition1_type: "diffusion"
+  transition1_config:
+    model_type: "unet"
+    hidden_dim: 128
+    num_layers: 4
+    num_heads: 8
+    dropout: 0.1
+    use_attention: true
+    activation: "swish"
+    norm_type: "layer"
+    
+    # Diffusion配置
+    num_diffusion_steps: 100
+    beta_start: 0.0001
+    beta_end: 0.02
+    beta_schedule: "cosine"
+    use_cfg: true
+    cfg_strength: 1.0
+    
+    # 条件配置
+    condition_dim: 132  # hidden_dim + action_dim
+    condition_type: "concat"
+    
+  # Transition2配置 (ControlNet)
+  transition2_type: "controlnet"
+  transition2_config:
+    model_type: "controlnet"
+    hidden_dim: 128
+    num_layers: 6
+    num_heads: 8
+    dropout: 0.1
+    
+    # 多条件配置
+    condition_dims: [64, 64, 4]  # [lift_dim, splat_dim, action_dim]
+    condition_fusion: "cross_attention"
+    
+    # ControlNet特定配置
+    control_channels: 132
+    control_layers: [0, 2, 4]
+    zero_convs: true
+    
+  # 融合配置
+  fusion_strategy: "feature_level"
+  fusion_config:
+    learnable_weights: true
+    weight_init: "uniform"
+    temperature: 1.0
+    
+    # 特征级融合
+    feature_fusion_type: "weighted_sum"
+    use_quality_assessment: true
+    quality_dim: 32
+    
+  # 内存配置
+  memory_config:
+    max_history_length: 10
+    memory_dim: 64
+    use_memory_attention: true
+    memory_decay: 0.9
+    
+  # 训练配置
+  training_config:
+    use_teacher_forcing: true
+    teacher_forcing_ratio: 0.5
+    use_curriculum_learning: true
+    curriculum_epochs: 20
+    
+    # 正则化
+    dropout: 0.1
+    weight_decay: 1e-5
+    gradient_clip: 1.0
+    
+    # 损失配置
+    loss_weights:
+      reconstruction: 1.0
+      kl: 0.1
+      consistency: 0.5
+      temporal: 0.1
+      
+  # 推理配置
+  inference_config:
+    use_ema: true
+    ema_decay: 0.999
+    num_samples: 1
+    use_ddim: false
+    ddim_steps: 50 
