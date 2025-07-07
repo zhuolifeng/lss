@@ -1,0 +1,35 @@
+# @package _global_
+
+# 损失配置
+losses:
+  # 损失权重
+  weights:
+    reconstruction: 1.0
+    kl: 0.1
+    consistency: 0.5
+    markov_regularization: 0.2
+    depth: 1.0
+    measurement: 1.0
+    bev_kl: 0.5
+    state_kl: 0.5
+    
+  # 损失函数配置
+  depth_loss:
+    type: "mse"
+    reduction: "mean"
+    
+  measurement_loss:
+    type: "cross_entropy"
+    reduction: "mean"
+    ignore_index: -1
+    
+  kl_loss:
+    type: "kl_divergence"
+    reduction: "mean"
+    beta: 1.0
+    
+  # 温度参数
+  temperature: 1.0
+  
+  # 损失平滑
+  label_smoothing: 0.0 

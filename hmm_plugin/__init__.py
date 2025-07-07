@@ -16,7 +16,7 @@ from .transitions import (
     ControlNetTransition2,
     BaseTransition
 )
-from .fusion import WeightLearner, FusionStrategy
+from .fusion import WeightLearner
 from .models import UNetDiffusion, DiTDiffusion, MambaDiffusion
 from .utils import ActionEncoder
 
@@ -30,7 +30,6 @@ __all__ = [
     "ControlNetTransition2",
     "BaseTransition",
     "WeightLearner",
-    "FusionStrategy",
     "UNetDiffusion",
     "DiTDiffusion", 
     "MambaDiffusion",

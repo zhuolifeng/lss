@@ -1,20 +1,26 @@
 """
-训练工具函数
-包含检查点保存/加载、日志设置、平均值计算等功能
+HMM训练工具模块
+提供训练过程中的辅助功能
+
+主要组件：
+1. AverageMeter: 平均值计算器
+2. ProgressMeter: 进度显示器
+3. 检查点保存和加载函数
+4. 日志设置函数
 """
 
 import os
+import time
+import json
 import logging
+from typing import Dict, List, Any, Optional, Union, Tuple
+
 import torch
 import numpy as np
-import random
-from typing import Dict, Any, Optional
-import json
-from pathlib import Path
 
 
 class AverageMeter:
-    """计算和存储平均值和当前值"""
+    """计算并存储平均值和当前值"""
     
     def __init__(self, name: str = '', fmt: str = ':f'):
         self.name = name
@@ -22,18 +28,21 @@ class AverageMeter:
         self.reset()
     
     def reset(self):
+        """重置所有计数器"""
         self.val = 0
         self.avg = 0
         self.sum = 0
         self.count = 0
     
     def update(self, val: float, n: int = 1):
+        """更新计数器"""
         self.val = val
         self.sum += val * n
         self.count += n
         self.avg = self.sum / self.count
     
     def __str__(self):
+        """字符串表示"""
         fmtstr = '{name} {val' + self.fmt + '} ({avg' + self.fmt + '})'
         return fmtstr.format(**self.__dict__)
 
@@ -47,11 +56,13 @@ class ProgressMeter:
         self.prefix = prefix
     
     def display(self, batch: int):
+        """显示进度"""
         entries = [self.prefix + self.batch_fmtstr.format(batch)]
-        entries += [str(m) for m in self.meters]
+        entries += [str(meter) for meter in self.meters]
         print('\t'.join(entries))
     
     def _get_batch_fmtstr(self, num_batches: int):
+        """获取批次格式字符串"""
         num_digits = len(str(num_batches // 1))
         fmt = '{:' + str(num_digits) + 'd}'
         return '[' + fmt + '/' + fmt.format(num_batches) + ']'
@@ -61,31 +72,35 @@ def setup_logging(name: str,
                   log_file: str, 
                   level: int = logging.INFO,
                   console: bool = True) -> logging.Logger:
-    """设置日志记录器"""
+    """
+    设置日志
     
-    # 创建日志目录
-    os.makedirs(os.path.dirname(log_file), exist_ok=True)
+    Args:
+        name: 日志器名称
+        log_file: 日志文件路径
+        level: 日志级别
+        console: 是否输出到控制台
     
-    # 创建logger
+    Returns:
+        logger: 日志器
+    """
+    # 创建日志器
     logger = logging.getLogger(name)
     logger.setLevel(level)
     
-    # 避免重复添加handler
-    if logger.handlers:
-        return logger
+    # 创建日志文件目录
+    os.makedirs(os.path.dirname(log_file), exist_ok=True)
     
-    # 创建formatter
+    # 文件处理器
+    file_handler = logging.FileHandler(log_file)
+    file_handler.setLevel(level)
     formatter = logging.Formatter(
         '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
-    
-    # 文件handler
-    file_handler = logging.FileHandler(log_file)
-    file_handler.setLevel(level)
     file_handler.setFormatter(formatter)
     logger.addHandler(file_handler)
     
-    # 控制台handler
+    # 控制台处理器
     if console:
         console_handler = logging.StreamHandler()
         console_handler.setLevel(level)
@@ -96,12 +111,16 @@ def setup_logging(name: str,
 
 
 def set_seed(seed: int):
-    """设置随机种子"""
-    random.seed(seed)
-    np.random.seed(seed)
+    """
+    设置随机种子，保证结果可重复
+    
+    Args:
+        seed: 随机种子
+    """
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
+    np.random.seed(seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
@@ -109,54 +128,78 @@ def set_seed(seed: int):
 def save_checkpoint(checkpoint: Dict[str, Any], 
                    checkpoint_dir: str, 
                    filename: str):
-    """保存检查点"""
+    """
+    保存检查点
+    
+    Args:
+        checkpoint: 检查点字典
+        checkpoint_dir: 保存目录
+        filename: 文件名
+    """
     os.makedirs(checkpoint_dir, exist_ok=True)
-    filepath = os.path.join(checkpoint_dir, filename)
-    torch.save(checkpoint, filepath)
-    print(f"Checkpoint saved to {filepath}")
+    checkpoint_path = os.path.join(checkpoint_dir, filename)
+    torch.save(checkpoint, checkpoint_path)
+    print(f"Saved checkpoint to {checkpoint_path}")
 
 
 def load_checkpoint(checkpoint_path: str, 
                    device: torch.device) -> Dict[str, Any]:
-    """加载检查点"""
-    if not os.path.exists(checkpoint_path):
-        raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
+    """
+    加载检查点
     
+    Args:
+        checkpoint_path: 检查点路径
+        device: 设备
+    
+    Returns:
+        checkpoint: 检查点字典
+    """
     checkpoint = torch.load(checkpoint_path, map_location=device)
-    print(f"Checkpoint loaded from {checkpoint_path}")
+    print(f"Loaded checkpoint from {checkpoint_path}")
     return checkpoint
 
 
 def count_parameters(model: torch.nn.Module) -> int:
-    """计算模型参数数量"""
+    """
+    计算模型参数数量
+    """
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
 
 def get_memory_usage() -> Dict[str, float]:
-    """获取GPU内存使用情况"""
+    """
+    获取GPU显存使用情况
+    
+    Returns:
+        memory_dict: 显存使用字典
+    """
     if torch.cuda.is_available():
-        allocated = torch.cuda.memory_allocated() / 1024**3  # GB
-        cached = torch.cuda.memory_reserved() / 1024**3      # GB
+        memory_allocated = torch.cuda.memory_allocated() / (1024 ** 3)  # GB
+        memory_reserved = torch.cuda.memory_reserved() / (1024 ** 3)    # GB
+        max_memory = torch.cuda.max_memory_allocated() / (1024 ** 3)    # GB
+        
         return {
-            'allocated': allocated,
-            'cached': cached,
-            'free': cached - allocated
+            'allocated': memory_allocated,
+            'reserved': memory_reserved,
+            'max': max_memory
         }
     else:
-        return {'allocated': 0, 'cached': 0, 'free': 0}
+        return {'allocated': 0, 'reserved': 0, 'max': 0}
 
 
 def save_config(config: Dict[str, Any], config_path: str):
-    """保存配置文件"""
+    """保存配置到JSON文件"""
     os.makedirs(os.path.dirname(config_path), exist_ok=True)
     with open(config_path, 'w') as f:
         json.dump(config, f, indent=2)
+    print(f"Saved config to {config_path}")
 
 
 def load_config(config_path: str) -> Dict[str, Any]:
-    """加载配置文件"""
+    """从JSON文件加载配置"""
     with open(config_path, 'r') as f:
-        return json.load(f)
+        config = json.load(f)
+    return config
 
 
 class EarlyStopping:
@@ -166,33 +209,56 @@ class EarlyStopping:
                  patience: int = 7, 
                  min_delta: float = 0, 
                  restore_best_weights: bool = True):
+        """
+        初始化
+        
+        Args:
+            patience: 容忍轮数
+            min_delta: 最小变化量
+            restore_best_weights: 是否恢复最佳权重
+        """
         self.patience = patience
         self.min_delta = min_delta
         self.restore_best_weights = restore_best_weights
-        self.best_loss = None
         self.counter = 0
+        self.best_score = None
+        self.early_stop = False
         self.best_weights = None
-        
+    
     def __call__(self, val_loss: float, model: torch.nn.Module) -> bool:
-        if self.best_loss is None:
-            self.best_loss = val_loss
-            self.best_weights = model.state_dict().copy() if self.restore_best_weights else None
-        elif val_loss < self.best_loss - self.min_delta:
-            self.best_loss = val_loss
-            self.counter = 0
-            self.best_weights = model.state_dict().copy() if self.restore_best_weights else None
-        else:
+        """
+        检查是否早停
+        
+        Args:
+            val_loss: 验证损失
+            model: 模型
+        
+        Returns:
+            early_stop: 是否早停
+        """
+        score = -val_loss
+        
+        if self.best_score is None:
+            self.best_score = score
+            if self.restore_best_weights:
+                self.best_weights = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+        elif score < self.best_score + self.min_delta:
             self.counter += 1
-            
-        if self.counter >= self.patience:
-            if self.restore_best_weights and self.best_weights is not None:
-                model.load_state_dict(self.best_weights)
-            return True
-        return False
+            if self.counter >= self.patience:
+                self.early_stop = True
+                if self.restore_best_weights and self.best_weights is not None:
+                    model.load_state_dict(self.best_weights)
+        else:
+            self.best_score = score
+            if self.restore_best_weights:
+                self.best_weights = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+            self.counter = 0
+        
+        return self.early_stop
 
 
 class LearningRateScheduler:
-    """学习率调度器"""
+    """学习率调度器包装器"""
     
     def __init__(self, 
                  optimizer: torch.optim.Optimizer,
@@ -201,6 +267,17 @@ class LearningRateScheduler:
                  patience: int = 10,
                  min_lr: float = 0,
                  eps: float = 1e-08):
+        """
+        初始化
+        
+        Args:
+            optimizer: 优化器
+            mode: 模式，'min'或'max'
+            factor: 缩放因子
+            patience: 容忍轮数
+            min_lr: 最小学习率
+            eps: 最小变化量
+        """
         self.optimizer = optimizer
         self.mode = mode
         self.factor = factor
@@ -208,123 +285,172 @@ class LearningRateScheduler:
         self.min_lr = min_lr
         self.eps = eps
         
-        self.best = None
-        self.num_bad_epochs = 0
-        self.last_epoch = 0
+        self.best_score = None
+        self.counter = 0
         
+        # 验证模式
+        assert mode in ['min', 'max'], "mode must be 'min' or 'max'"
+        
+        # 记录初始学习率
+        self.init_lrs = [group['lr'] for group in optimizer.param_groups]
+    
     def step(self, metrics: float):
-        current = float(metrics)
+        """
+        调度器步进
         
-        if self.best is None:
-            self.best = current
-        elif self.mode == 'min' and current < self.best - self.eps:
-            self.best = current
-            self.num_bad_epochs = 0
-        elif self.mode == 'max' and current > self.best + self.eps:
-            self.best = current
-            self.num_bad_epochs = 0
+        Args:
+            metrics: 指标值
+        """
+        # 初始化最佳分数
+        if self.best_score is None:
+            self.best_score = metrics
+            return
+        
+        # 检查是否需要减少学习率
+        if (self.mode == 'min' and metrics < self.best_score - self.eps) or \
+           (self.mode == 'max' and metrics > self.best_score + self.eps):
+            self.best_score = metrics
+            self.counter = 0
         else:
-            self.num_bad_epochs += 1
-        
-        if self.num_bad_epochs > self.patience:
-            self._reduce_lr()
-            self.num_bad_epochs = 0
-        
-        self.last_epoch += 1
+            self.counter += 1
+            if self.counter >= self.patience:
+                self._reduce_lr()
+                self.counter = 0
     
     def _reduce_lr(self):
-        for i, param_group in enumerate(self.optimizer.param_groups):
-            old_lr = float(param_group['lr'])
+        """减少学习率"""
+        for i, group in enumerate(self.optimizer.param_groups):
+            old_lr = group['lr']
             new_lr = max(old_lr * self.factor, self.min_lr)
             if old_lr - new_lr > self.eps:
-                param_group['lr'] = new_lr
-                print(f'Reducing learning rate of group {i} to {new_lr:.4e}.')
+                group['lr'] = new_lr
+                print(f'Reducing learning rate of group {i} from {old_lr:.6f} to {new_lr:.6f}')
 
 
 class MetricTracker:
     """指标跟踪器"""
     
     def __init__(self):
-        self.data = {}
-        
+        """初始化"""
+        self.metrics = {}
+    
     def update(self, **kwargs):
+        """
+        更新指标
+        
+        Args:
+            **kwargs: 指标字典
+        """
         for key, value in kwargs.items():
-            if key not in self.data:
-                self.data[key] = []
-            if isinstance(value, torch.Tensor):
-                value = value.item()
-            self.data[key].append(value)
+            if key not in self.metrics:
+                self.metrics[key] = []
+            self.metrics[key].append(value)
     
     def avg(self, key: str, last_n: int = None) -> float:
-        """计算指定指标的平均值"""
-        if key not in self.data:
+        """
+        计算指标平均值
+        
+        Args:
+            key: 指标名称
+            last_n: 最后n个值，None表示所有
+            
+        Returns:
+            avg: 平均值
+        """
+        values = self.metrics.get(key, [])
+        if not values:
             return 0.0
-        values = self.data[key]
-        if last_n:
+        
+        if last_n is not None:
             values = values[-last_n:]
-        return sum(values) / len(values) if values else 0.0
+        
+        return sum(values) / len(values)
     
     def get(self, key: str) -> list:
-        """获取指定指标的所有值"""
-        return self.data.get(key, [])
+        """获取指标值列表"""
+        return self.metrics.get(key, [])
     
     def reset(self):
-        """重置所有数据"""
-        self.data = {}
+        """重置所有指标"""
+        self.metrics = {}
     
     def summary(self) -> Dict[str, float]:
-        """获取所有指标的摘要"""
-        summary = {}
-        for key, values in self.data.items():
-            if values:
-                summary[f'{key}_avg'] = sum(values) / len(values)
-                summary[f'{key}_last'] = values[-1]
-                summary[f'{key}_min'] = min(values)
-                summary[f'{key}_max'] = max(values)
-        return summary
+        """
+        获取所有指标的平均值
+        
+        Returns:
+            summary_dict: 摘要字典
+        """
+        return {
+            key: sum(values) / len(values) if values else 0.0
+            for key, values in self.metrics.items()
+        }
 
 
 def accuracy(output: torch.Tensor, target: torch.Tensor, topk: tuple = (1,)) -> list:
-    """计算top-k准确率"""
-    maxk = max(topk)
-    batch_size = target.size(0)
+    """
+    计算topk准确率
     
-    _, pred = output.topk(maxk, 1, True, True)
-    pred = pred.t()
-    correct = pred.eq(target.view(1, -1).expand_as(pred))
+    Args:
+        output: 预测输出 [batch_size, num_classes]
+        target: 目标标签 [batch_size]
+        topk: topk值元组
     
-    res = []
-    for k in topk:
-        correct_k = correct[:k].reshape(-1).float().sum(0)
-        res.append(correct_k.mul_(100.0 / batch_size))
-    return res
+    Returns:
+        res: topk准确率列表
+    """
+    with torch.no_grad():
+        maxk = max(topk)
+        batch_size = target.size(0)
+        
+        _, pred = output.topk(maxk, 1, True, True)
+        pred = pred.t()
+        correct = pred.eq(target.view(1, -1).expand_as(pred))
+        
+        res = []
+        for k in topk:
+            correct_k = correct[:k].float().sum()
+            res.append(correct_k.mul_(100.0 / batch_size))
+        return res
 
 
 def compute_iou(pred: torch.Tensor, target: torch.Tensor, 
                 num_classes: int, ignore_index: int = -1) -> torch.Tensor:
-    """计算IoU"""
-    pred = pred.flatten()
-    target = target.flatten()
+    """
+    计算IoU
     
-    # 忽略指定类别
-    mask = target != ignore_index
-    pred = pred[mask]
-    target = target[mask]
+    Args:
+        pred: 预测结果 [N, H, W]
+        target: 目标标签 [N, H, W]
+        num_classes: 类别数
+        ignore_index: 忽略的索引
     
-    iou_per_class = []
-    for c in range(num_classes):
-        pred_c = (pred == c)
-        target_c = (target == c)
+    Returns:
+        iou: 每个类别的IoU [num_classes]
+    """
+    with torch.no_grad():
+        # 创建mask
+        mask = (target != ignore_index)
         
-        intersection = (pred_c & target_c).sum().float()
-        union = (pred_c | target_c).sum().float()
+        # 将预测和目标展平
+        pred_flat = pred[mask]
+        target_flat = target[mask]
         
-        if union == 0:
-            iou_per_class.append(float('nan'))
-        else:
-            iou_per_class.append((intersection / union).item())
-    
-    return torch.tensor(iou_per_class)
+        # 计算混淆矩阵
+        confusion_matrix = torch.zeros(num_classes, num_classes, device=pred.device)
+        for i in range(num_classes):
+            for j in range(num_classes):
+                confusion_matrix[i, j] = torch.sum((pred_flat == i) & (target_flat == j))
+        
+        # 计算IoU
+        iou = torch.zeros(num_classes, device=pred.device)
+        for i in range(num_classes):
+            intersection = confusion_matrix[i, i]
+            union = torch.sum(confusion_matrix[i, :]) + torch.sum(confusion_matrix[:, i]) - intersection
+            if union > 0:
+                iou[i] = intersection / union
+        
+        return iou
 
 
 def create_optimizer(model: torch.nn.Module, 
@@ -332,16 +458,25 @@ def create_optimizer(model: torch.nn.Module,
                     learning_rate: float = 1e-4,
                     weight_decay: float = 1e-5,
                     **kwargs) -> torch.optim.Optimizer:
-    """创建优化器"""
-    params = [p for p in model.parameters() if p.requires_grad]
+    """
+    创建优化器
     
-    if optimizer_type.lower() == 'adamw':
-        return torch.optim.AdamW(params, lr=learning_rate, weight_decay=weight_decay, **kwargs)
-    elif optimizer_type.lower() == 'adam':
-        return torch.optim.Adam(params, lr=learning_rate, weight_decay=weight_decay, **kwargs)
-    elif optimizer_type.lower() == 'sgd':
-        return torch.optim.SGD(params, lr=learning_rate, weight_decay=weight_decay, 
-                              momentum=kwargs.get('momentum', 0.9), **kwargs)
+    Args:
+        model: 模型
+        optimizer_type: 优化器类型
+        learning_rate: 学习率
+        weight_decay: 权重衰减
+        **kwargs: 其他参数
+    
+    Returns:
+        optimizer: 优化器
+    """
+    if optimizer_type == 'adam':
+        return torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=weight_decay, **kwargs)
+    elif optimizer_type == 'adamw':
+        return torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay, **kwargs)
+    elif optimizer_type == 'sgd':
+        return torch.optim.SGD(model.parameters(), lr=learning_rate, weight_decay=weight_decay, momentum=0.9, **kwargs)
     else:
         raise ValueError(f"Unknown optimizer type: {optimizer_type}")
 
@@ -349,75 +484,11 @@ def create_optimizer(model: torch.nn.Module,
 def warmup_lr_scheduler(optimizer: torch.optim.Optimizer,
                        warmup_iters: int,
                        warmup_factor: float = 1.0 / 3):
-    """学习率预热调度器"""
+    """预热学习率调度器"""
     def f(x):
         if x >= warmup_iters:
             return 1
         alpha = float(x) / warmup_iters
         return warmup_factor * (1 - alpha) + alpha
     
-    return torch.optim.lr_scheduler.LambdaLR(optimizer, f)
-
-
-def get_device_info() -> Dict[str, Any]:
-    """获取设备信息"""
-    info = {
-        'cuda_available': torch.cuda.is_available(),
-        'cuda_version': torch.version.cuda,
-        'device_count': torch.cuda.device_count(),
-    }
-    
-    if torch.cuda.is_available():
-        info['device_name'] = torch.cuda.get_device_name()
-        info['memory_allocated'] = torch.cuda.memory_allocated() / 1024**3
-        info['memory_reserved'] = torch.cuda.memory_reserved() / 1024**3
-    
-    return info
-
-
-def cleanup_old_files(directory: str, pattern: str, keep_last: int = 5):
-    """清理旧文件"""
-    if not os.path.exists(directory):
-        return
-    
-    files = [f for f in os.listdir(directory) if pattern in f]
-    files.sort(key=lambda x: os.path.getmtime(os.path.join(directory, x)))
-    
-    if len(files) > keep_last:
-        for f in files[:-keep_last]:
-            os.remove(os.path.join(directory, f))
-            print(f"Removed old file: {f}")
-
-
-# 示例使用
-if __name__ == "__main__":
-    # 测试平均值计算器
-    meter = AverageMeter('Loss', ':.4f')
-    for i in range(10):
-        meter.update(np.random.random())
-    print(f"Average meter: {meter}")
-    
-    # 测试指标跟踪器
-    tracker = MetricTracker()
-    for i in range(5):
-        tracker.update(
-            loss=np.random.random(),
-            accuracy=np.random.random() * 100,
-            lr=1e-4 * (0.9 ** i)
-        )
-    
-    print("Metric tracker summary:")
-    for key, value in tracker.summary().items():
-        print(f"  {key}: {value:.4f}")
-    
-    # 测试设备信息
-    print("\nDevice info:")
-    device_info = get_device_info()
-    for key, value in device_info.items():
-        print(f"  {key}: {value}")
-    
-    # 测试内存使用
-    print("\nMemory usage:")
-    memory_info = get_memory_usage()
-    for key, value in memory_info.items():
-        print(f"  {key}: {value:.2f} GB") 
+    return torch.optim.lr_scheduler.LambdaLR(optimizer, f) 

@@ -1,0 +1,28 @@
+# @package _global_
+
+# 融合配置
+fusion:
+  strategy: "multi_path"
+  weight_type: "learnable"
+  use_kl: true
+  
+  # 权重学习配置
+  weight_learner:
+    hidden_dim: 256
+    num_layers: 3
+    activation: "relu"
+    dropout: 0.1
+    
+  # 三路融合配置
+  triple_fusion:
+    use_quality_assessment: true
+    quality_hidden_dim: 128
+    diversity_target: 0.2
+    balance_weight: 0.1
+    
+  # 融合损失权重
+  fusion_loss_weights:
+    consistency: 0.5
+    weight_regularization: 0.1
+    diversity: 0.3
+    balance: 0.1 

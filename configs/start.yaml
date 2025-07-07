@@ -1,0 +1,42 @@
+defaults:
+  - models: hmm_unet        # 默认使用UNet模型
+  - training: default       # 使用默认训练配置
+  - fusion: default         # 使用默认融合配置
+  - losses: default         # 使用默认损失配置
+  - _self_                  # 当前文件的配置优先级最高
+
+# 全局配置
+experiment_name: "hmm_plugin_training"
+output_dir: "./hmm_experiments"
+run_name: "${experiment_name}_${now:%Y-%m-%d_%H-%M-%S}"
+
+# LSS模型配置
+lss:
+  config_path: "configs/lss_config.json"  # LSS配置文件（如果不存在会使用默认配置）
+  checkpoint_path: "model200000.pt"  # LSS预训练权重路径
+  
+# 设备配置
+device: "cuda"
+seed: 42
+
+# 日志配置
+logging:
+  level: "INFO"
+  use_tensorboard: true
+  log_every: 10
+  
+# 数据配置
+data:
+  dataset: "nuscenes"
+  data_root: "/dataset/nuscenes"
+  version: "v1.0-mini"  # 改为mini版本便于快速测试
+  
+# Hydra配置
+hydra:
+  run:
+    dir: ${output_dir}/${run_name}
+  sweep:
+    dir: ${output_dir}
+    subdir: ${run_name}
+  job:
+    chdir: true 

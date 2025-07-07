@@ -55,11 +55,9 @@ class DiffusionTransition1(BaseTransition):
         # 创建核心diffusion模型
         self.core_network = self._create_diffusion_model()
         
-        # 时间步编码
-        self.time_embedding = SinusoidalPosEmb(hidden_dim)
-        
-        # 条件编码（用于CFG）
-        self.condition_embedding = nn.Linear(input_dim, hidden_dim)
+        # 条件编码（用于CFG）- 延迟初始化以匹配实际输入维度
+        self.condition_embedding = None
+        self.expected_input_dim = input_dim
         
         # 输出投影
         self.output_proj = nn.Linear(hidden_dim, output_dim)
@@ -148,8 +146,11 @@ class DiffusionTransition1(BaseTransition):
     
     def _predict_noise(self, noisy_x: torch.Tensor, t: torch.Tensor, condition: torch.Tensor) -> torch.Tensor:
         """预测噪声"""
-        # 时间步编码
-        t_emb = self.time_embedding(t)
+        # 动态创建条件嵌入层（如果尚未创建）
+        if self.condition_embedding is None:
+            actual_input_dim = condition.shape[-1]
+            self.condition_embedding = nn.Linear(actual_input_dim, self.hidden_dim).to(condition.device)
+            print(f"动态创建条件嵌入层: {actual_input_dim} -> {self.hidden_dim}")
         
         # 条件编码
         cond_emb = self.condition_embedding(condition)
@@ -161,7 +162,7 @@ class DiffusionTransition1(BaseTransition):
             
             # 合并条件和无条件
             combined_x = torch.cat([noisy_x, noisy_x], dim=0)
-            combined_t = torch.cat([t_emb, t_emb], dim=0)
+            combined_t = torch.cat([t, t], dim=0)  # 直接传递时间步，不进行嵌入
             combined_cond = torch.cat([cond_emb, uncond_emb], dim=0)
             
             # 预测
@@ -173,8 +174,8 @@ class DiffusionTransition1(BaseTransition):
             # CFG
             pred_noise = uncond_pred + self.cfg_scale * (cond_pred - uncond_pred)
         else:
-            # 标准预测
-            pred_noise = self.core_network(noisy_x, t_emb, cond_emb)
+            # 标准预测 - 直接传递时间步，让UNetDiffusion内部处理时间嵌入
+            pred_noise = self.core_network(noisy_x, t, cond_emb)
         
         return pred_noise
     
@@ -220,23 +221,6 @@ class DiffusionTransition1(BaseTransition):
         
         self.cfg_scale = old_cfg_scale
         return result
-
-
-class SinusoidalPosEmb(nn.Module):
-    """正弦位置编码"""
-    
-    def __init__(self, dim: int):
-        super().__init__()
-        self.dim = dim
-        
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        device = x.device
-        half_dim = self.dim // 2
-        emb = math.log(10000) / (half_dim - 1)
-        emb = torch.exp(torch.arange(half_dim, device=device) * -emb)
-        emb = x[:, None] * emb[None, :]
-        emb = torch.cat((emb.sin(), emb.cos()), dim=-1)
-        return emb
 
 
 # 示例使用

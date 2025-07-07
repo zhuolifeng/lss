@@ -288,10 +288,14 @@ class TimeEmbedding(nn.Module):
     def forward(self, timestep: torch.Tensor) -> torch.Tensor:
         """
         Args:
-            timestep: [B]
+            timestep: [B] 时间步
         Returns:
             time_embed: [B, hidden_dim]
         """
+        # 确保timestep是1D张量
+        if timestep.dim() > 1:
+            timestep = timestep.flatten()
+        
         # 正弦嵌入
         emb = timestep.float()[:, None] * self.freq_embed[None, :]
         emb = torch.cat([torch.sin(emb), torch.cos(emb)], dim=-1)

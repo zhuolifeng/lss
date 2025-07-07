@@ -137,3 +137,5 @@ imagenet_pretrained/
 *.csv
 
 lss_corruption_*/
+
+hmm_experiments/

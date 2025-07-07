@@ -9,10 +9,11 @@
 """
 
 from .weight_learner import WeightLearner
-from .fusion_strategies import FusionStrategy, create_fusion_module
+from .fusion_strategies import FusionStrategy, create_fusion_strategy, create_fusion_module
 
 __all__ = [
     'WeightLearner',
     'FusionStrategy', 
+    'create_fusion_strategy',
     'create_fusion_module'
 ] 

@@ -133,7 +133,46 @@ class MarkovianHiddenState(nn.Module):
         关键：新状态只依赖于当前隐状态和当前观测
         历史信息已经编码在隐状态中
         """
-        batch_size = current_lift.shape[0]
+        # 处理维度不匹配问题 - 将所有输入展平到2D
+        if current_lift.dim() > 2:
+            current_lift = current_lift.view(current_lift.shape[0], -1)
+        if current_splat.dim() > 2:
+            current_splat = current_splat.view(current_splat.shape[0], -1)
+        if current_action.dim() > 2:
+            current_action = current_action.view(current_action.shape[0], -1)
+        
+        # 找到最大的batch size，并将所有张量调整到相同的batch size
+        batch_sizes = [current_lift.shape[0], current_splat.shape[0], current_action.shape[0]]
+        max_batch_size = max(batch_sizes)
+        
+        # 调整所有张量到相同的batch size
+        if current_lift.shape[0] != max_batch_size:
+            # 如果batch size不匹配，重复张量以匹配最大batch size
+            repeat_factor = max_batch_size // current_lift.shape[0]
+            current_lift = current_lift.repeat(repeat_factor, 1)
+            
+        if current_splat.shape[0] != max_batch_size:
+            repeat_factor = max_batch_size // current_splat.shape[0]
+            current_splat = current_splat.repeat(repeat_factor, 1)
+            
+        if current_action.shape[0] != max_batch_size:
+            repeat_factor = max_batch_size // current_action.shape[0]
+            current_action = current_action.repeat(repeat_factor, 1)
+        
+        batch_size = max_batch_size
+        
+        # 创建投影层以确保维度一致（如果不存在的话）
+        if not hasattr(self, '_lift_proj'):
+            self._lift_proj = nn.Linear(current_lift.shape[1], self.config.lift_feature_dim).to(current_lift.device)
+        if not hasattr(self, '_splat_proj'):
+            self._splat_proj = nn.Linear(current_splat.shape[1], self.config.splat_feature_dim).to(current_splat.device)
+        if not hasattr(self, '_action_proj'):
+            self._action_proj = nn.Linear(current_action.shape[1], self.config.action_dim).to(current_action.device)
+        
+        # 投影到固定维度
+        current_lift = self._lift_proj(current_lift)
+        current_splat = self._splat_proj(current_splat)
+        current_action = self._action_proj(current_action)
         
         # 扩展隐状态到batch
         hidden_state = self.current_hidden_state.expand(batch_size, -1)
@@ -376,6 +415,42 @@ class HMMPlugin(nn.Module):
         关键：所有转移都只依赖当前隐状态，不直接使用历史序列
         """
         batch_size = lift_features.shape[0]
+        
+        # 处理输入特征的维度 - 确保都是2D张量，但限制维度
+        if lift_features.dim() > 2:
+            # 如果是高维特征，先进行平均池化再展平
+            if lift_features.dim() == 4:  # [B, C, H, W]
+                lift_features = lift_features.mean(dim=(2, 3))  # [B, C]
+            elif lift_features.dim() == 5:  # [B, N, C, H, W]
+                lift_features = lift_features.mean(dim=(1, 3, 4))  # [B, C]
+            else:
+                lift_features = lift_features.view(batch_size, -1)
+                # 如果维度过大，投影到固定维度
+                if lift_features.shape[1] > self.config.lift_feature_dim * 4:
+                    if not hasattr(self, '_lift_proj_large'):
+                        self._lift_proj_large = nn.Linear(lift_features.shape[1], self.config.lift_feature_dim).to(lift_features.device)
+                    lift_features = self._lift_proj_large(lift_features)
+        
+        if splat_features.dim() > 2:
+            if splat_features.dim() == 4:  # [B, C, H, W]
+                splat_features = splat_features.mean(dim=(2, 3))  # [B, C]
+            elif splat_features.dim() == 5:  # [B, N, C, H, W]
+                splat_features = splat_features.mean(dim=(1, 3, 4))  # [B, C]
+            else:
+                splat_features = splat_features.view(batch_size, -1)
+                # 如果维度过大，投影到固定维度
+                if splat_features.shape[1] > self.config.splat_feature_dim * 4:
+                    if not hasattr(self, '_splat_proj_large'):
+                        self._splat_proj_large = nn.Linear(splat_features.shape[1], self.config.splat_feature_dim).to(splat_features.device)
+                    splat_features = self._splat_proj_large(splat_features)
+        
+        if actions.dim() > 2:
+            actions = actions.view(batch_size, -1)
+            # 限制动作维度
+            if actions.shape[1] > self.config.action_dim * 2:
+                if not hasattr(self, '_action_proj_large'):
+                    self._action_proj_large = nn.Linear(actions.shape[1], self.config.action_dim).to(actions.device)
+                actions = self._action_proj_large(actions)
         
         # 1. 动作编码
         encoded_actions = self.action_encoder(actions)

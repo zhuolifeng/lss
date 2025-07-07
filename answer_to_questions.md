@@ -91,67 +91,7 @@ Splat_enhanced = Transition2(Lift_current, Splat_current, Actions)
 
 # 核心创新：双transition创新融合
 Final_features = DualFusion(Lift_enhanced, Splat_enhanced)
-```
-
-### 2.2 三种创新融合策略
-
-#### 策略1：Hierarchical（层次化）- 最创新
-```python
-def hierarchical_fusion(self, t1_out, t2_out, lift, splat):
-    """
-    创新点：Transition1的输出影响Transition2的行为
-    几何语义：视角几何信息指导BEV语义理解
-    """
-    # 1. 跨空间影响：视角特征影响BEV特征
-    cross_influence = self.cross_influence_net(t1_out)
-    enhanced_t2_out = t2_out + self.cross_influence * cross_influence
-    
-    # 2. 创新性交互：双向信息流
-    combined = torch.cat([t1_out, enhanced_t2_out], dim=-1)
-    innovation = self.innovation_interaction(combined)
-    
-    # 3. 分层增强：分别增强不同空间的特征
-    lift_innovation, splat_innovation = torch.chunk(innovation, 2, dim=-1)
-    
-    return {
-        'enhanced_lift': t1_out + lift_innovation,
-        'enhanced_splat': enhanced_t2_out + splat_innovation,
-        'cross_influence': cross_influence,
-        'innovation': innovation
-    }
-```
-
-**创新优势**：
-- 🔥 **跨空间信息流**：视角几何信息直接指导BEV语义
-- 🔥 **层次化理解**：从几何到语义的层次化建模
-- 🔥 **双向增强**：两个transition互相促进
-
-#### 策略2：Parallel（并行）- 平衡创新
-```python
-def parallel_fusion(self, t1_out, t2_out, lift, splat):
-    """
-    创新点：智能权重学习，动态平衡两个transition
-    """
-    # 学习动态融合权重
-    fusion_weights = self.fusion_weight_net(torch.cat([t1_out, t2_out], dim=-1))
-    
-    # 智能加权融合
-    enhanced_lift = fusion_weights[:, 0:1] * lift + fusion_weights[:, 1:2] * t1_out
-    enhanced_splat = fusion_weights[:, 0:1] * splat + fusion_weights[:, 1:2] * t2_out
-```
-
-#### 策略3：Cascade（级联）- 序列创新
-```python
-def cascade_fusion(self, t1_out, t2_out, lift, splat):
-    """
-    创新点：序列式信息传递，层层递进
-    """
-    # 第一级：lift特征增强
-    enhanced_lift = lift + t1_out
-    
-    # 第二级：基于增强lift的splat增强
-    lift_influence = self.cross_influence_net(enhanced_lift)
-    enhanced_splat = splat + t2_out + self.cross_influence * lift_influence
+ 
 ```
 
 ### 2.3 创新性体现
